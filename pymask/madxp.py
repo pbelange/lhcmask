@@ -100,6 +100,26 @@ def _extract_parameters(my_string):
         return my_list
 
 
+def get_tracking_string(particleData):
+    '''
+    Creates tracking string from particle initial coordinates.
+    ----------------------------------------------------------
+    Input:
+        particleData: pd.Series/dict containing canonical or action-angle coordinates
+    Output:
+        trackingCmd: formated string "start,x=0,px=0,y=0,py=0,t=0,pt=0,fx=0,phix=0,fy=0,phiy=0,ft=0,phit=0;"
+        (Default value is 0 for all coordinates)
+    '''
+
+    coordinates = ['x','px','y' ,'py' ,'t' ,'pt', 'fx','phix','fy','phiy','ft','phit']
+    trackingCmd = ['start']
+    trackingCmd += [f'{coord}={particleData.get(coord,0)}' for coord in coordinates]
+    trackingCmd = ','.join(trackingCmd)
+    return trackingCmd
+
+
+
+
 class Madxp(Madx):
     pass
 
@@ -362,3 +382,98 @@ class Madxp(Madx):
         my_df.index=[table._name]
         return my_df
 
+
+
+    def track(self,coordinates,NTurns=1024,filename='./tracking.madx'):
+        '''
+        Madxp method, tracking particles with madx from starting coordinates
+        --------------------------------------------------------------------
+        Input: 
+            coordinates : dataframe containing the initial coordinates of the particles to track (1 row per particle)
+            -> Alternatively, coordinates can be a list of dictionnary, [{'x':...,'y':...},...]
+            -> Alternatively, coordinates can be a dictionnary of arrays, {'x':np.array(...),'y':np.array(...)}
+        Returns:
+            tracked : tracknone table from mad instance.
+        '''
+
+        # Transforming coordinates to a dataframe for efficiency:
+        #-------------
+        if coordinates.__class__== pd.core.frame.DataFrame:
+            iterableDF = coordinates
+
+        elif coordinates.__class__==list:
+            iterableDF = pd.DataFrame(coordinates)
+
+        elif coordinates.__class__==dict:
+            tmp = [dict(zip(coordinates.keys(),thisParticle)) for thisParticle in zip(*coordinates.values())]
+            iterableDF = pd.DataFrame(tmp)
+        else:
+            raise ValueError('coordinates must DataFrame, list or dict.')   
+        
+
+        # Writing tracking file
+        #-------------
+        with open(filename, 'w+') as trackfile:
+            trackfile.write(f"track,dump, onetable = true;\n!{40*'-'}\n")
+            #-------
+            def writeCmd(particleData):
+                trackfile.write(get_tracking_string(particleData) + ';\n')
+            iterableDF.apply(writeCmd,axis=1)
+            #-------
+            trackfile.write((   f"!{40*'-'}\n"
+                                f"run,turns={NTurns};\n"
+                                f"endtrack;\n"))
+
+        # Sending to MadX     
+        #-------------
+        self.call(file = filename)
+
+
+        return self.table['trackone'].dframe()
+
+
+
+
+    def track_stringCmd(self,coordinates,NTurns=1024):
+        '''
+        Same as track() but sends string directly to MadX
+        '''
+
+        # Transforming coordinates to a dataframe for efficiency:
+        #-------------
+        if coordinates.__class__== pd.core.frame.DataFrame:
+            iterableDF = coordinates
+
+        elif coordinates.__class__==list:
+            iterableDF = pd.DataFrame(coordinates)
+
+        elif coordinates.__class__==dict:
+            tmp = [dict(zip(coordinates.keys(),thisParticle)) for thisParticle in zip(*coordinates.values())]
+            iterableDF = pd.DataFrame(tmp)
+        else:
+            raise ValueError('coordinates must DataFrame, list or dict.')   
+        
+
+        
+
+
+        # Creating a line for each particle to track. 
+        #-------------
+        trackingCmds = iterableDF.apply(get_tracking_string,axis=1)
+        trackingCmds = ';\n'.join(trackingCmds)
+
+
+        # Final MAD-X call for the tracking
+        #-------------
+        madCall = ( f"track,dump, onetable = true;\n"
+                    f"\n"
+                    f"!{40*'-'}\n"
+                    f"{trackingCmds};\n"
+                    f"!{40*'-'}\n"
+                    f"\n"
+                    f"run,turns={NTurns};\n"
+                    f"endtrack;")
+
+        self.input(madCall)
+
+        return self.table['trackone'].dframe()

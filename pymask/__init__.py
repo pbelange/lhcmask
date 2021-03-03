@@ -7,3 +7,5 @@ from .pymasktools import *
 from .lumi import *
 from .coupling import *
 from .tunechroma import *
+
+from .footprint import *
